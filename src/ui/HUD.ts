@@ -1,11 +1,15 @@
 // ============================================================
-// HUD.ts — MARS: 2187 in-game Heads-Up Display
+// HUD.ts - Cinematic FP Visor Overlay & Survival Mechanics
 // ============================================================
 
 export interface SuitHUDData {
-  oxygen: number;       // 0–100
-  battery: number;      // 0–100
-  temperature: number;  // 0–100 (mapped from actual °C range)
+  oxygen: number;
+  battery: number;
+  temperature: number; // raw value
+  integrity: number;
+  calories: number;
+  water: number;
+  heartRate: number;
 }
 
 export interface SystemStatus {
@@ -22,603 +26,308 @@ function injectHUDStyles(): void {
   const style = document.createElement('style');
   style.id = HUD_STYLE_ID;
   style.textContent = `
-    /* ── HUD Root ── */
+    @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap');
+
     #mars-hud {
       position: fixed;
       inset: 0;
       z-index: 1000;
       pointer-events: none;
-      font-family: 'Courier New', Courier, monospace;
-      color: #00ccff;
-      font-size: 12px;
-      letter-spacing: 0.08em;
+      font-family: 'Share Tech Mono', monospace;
+      color: #99d6ff;
       user-select: none;
+      overflow: hidden;
     }
 
-    /* ── Glass Panel ── */
+    .visor-overlay {
+      position: absolute;
+      inset: 0;
+      box-shadow: inset 0 0 100px rgba(0, 50, 100, 0.5), inset 0 0 200px rgba(0, 0, 0, 0.9);
+      border-radius: 20%;
+      transform: scale(1.1);
+      pointer-events: none;
+    }
+
+    .hud-header {
+      position: absolute;
+      top: 5%;
+      left: 50%;
+      transform: translateX(-50%);
+      text-align: center;
+      background: rgba(0, 30, 60, 0.4);
+      padding: 10px 40px;
+      border: 1px solid rgba(153, 214, 255, 0.4);
+      border-radius: 4px;
+      clip-path: polygon(10% 0%, 90% 0%, 100% 100%, 0% 100%);
+    }
+
+    .hud-eva-time {
+      font-size: 28px;
+      font-weight: bold;
+      color: #fff;
+      text-shadow: 0 0 10px rgba(255,255,255,0.5);
+    }
+
     .hud-panel {
-      background: rgba(0, 15, 25, 0.6);
-      border: 1px solid rgba(0, 200, 255, 0.3);
-      border-radius: 2px;
-      padding: 10px 14px;
-      backdrop-filter: blur(4px);
+      position: absolute;
+      background: rgba(0, 20, 40, 0.5);
+      border: 1px solid rgba(153, 214, 255, 0.3);
+      padding: 15px;
+      border-radius: 10px;
+      backdrop-filter: blur(2px);
     }
 
-    /* ── Crosshair ── */
+    .hud-left {
+      top: 15%;
+      left: 8%;
+      width: 200px;
+    }
+
+    .hud-right {
+      top: 15%;
+      right: 8%;
+      width: 220px;
+    }
+
+    .hud-bottom-center {
+      bottom: 8%;
+      left: 50%;
+      transform: translateX(-50%);
+      text-align: center;
+    }
+
+    .stat-row {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 8px;
+      font-size: 14px;
+    }
+
+    .stat-label {
+      color: #66b3ff;
+    }
+
+    .stat-value {
+      font-weight: bold;
+      color: #fff;
+    }
+
+    .stat-large {
+      font-size: 36px;
+      color: #fff;
+      margin: 10px 0;
+      text-shadow: 0 0 8px rgba(255,255,255,0.4);
+    }
+
+    .bar-container {
+      width: 100%;
+      height: 6px;
+      background: rgba(0, 50, 100, 0.5);
+      margin-top: 4px;
+      border-radius: 3px;
+      overflow: hidden;
+    }
+
+    .bar-fill {
+      height: 100%;
+      background: #99d6ff;
+      transition: width 0.3s;
+    }
+
+    .bar-fill.warning { background: #ffaa00; }
+    .bar-fill.critical { background: #ff2200; }
+
     #hud-crosshair {
       position: absolute;
       top: 50%;
       left: 50%;
-      transform: translate(-50%, -50%);
-      width: 24px;
-      height: 24px;
-    }
-    #hud-crosshair::before,
-    #hud-crosshair::after {
-      content: '';
-      position: absolute;
-      background: rgba(0, 200, 255, 0.75);
-    }
-    #hud-crosshair::before {
-      width: 2px;
-      height: 100%;
-      left: 50%;
-      transform: translateX(-50%);
-    }
-    #hud-crosshair::after {
-      height: 2px;
-      width: 100%;
-      top: 50%;
-      transform: translateY(-50%);
-    }
-    #hud-crosshair-dot {
-      position: absolute;
       width: 4px;
       height: 4px;
-      background: rgba(0, 200, 255, 0.9);
-      border-radius: 50%;
-      top: 50%;
-      left: 50%;
+      background: rgba(255,255,255,0.5);
       transform: translate(-50%, -50%);
-    }
-
-    /* ── Mission Panel (top-left) ── */
-    #hud-mission {
-      position: absolute;
-      top: 20px;
-      left: 20px;
-      min-width: 240px;
-      max-width: 340px;
-    }
-    #hud-mission-name {
-      font-size: 10px;
-      color: rgba(0, 200, 255, 0.6);
-      text-transform: uppercase;
-      letter-spacing: 0.2em;
-      margin-bottom: 4px;
-    }
-    #hud-mission-objective {
-      font-size: 12px;
-      color: #ffffff;
-      line-height: 1.5;
-    }
-
-    /* ── Suit Status (bottom-left) ── */
-    #hud-suit {
-      position: absolute;
-      bottom: 24px;
-      left: 20px;
-      min-width: 200px;
-    }
-    .suit-stat-row {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      margin-bottom: 7px;
-    }
-    .suit-stat-row:last-child { margin-bottom: 0; }
-    .suit-label {
-      width: 32px;
-      font-size: 9px;
-      color: rgba(0, 200, 255, 0.7);
-      text-transform: uppercase;
-      letter-spacing: 0.15em;
-      flex-shrink: 0;
-    }
-    .suit-bar-bg {
-      flex: 1;
-      height: 6px;
-      background: rgba(0, 40, 60, 0.8);
-      border: 1px solid rgba(0, 200, 255, 0.2);
-      border-radius: 1px;
-      overflow: hidden;
-      position: relative;
-    }
-    .suit-bar-fill {
-      height: 100%;
-      border-radius: 1px;
-      transition: width 0.4s ease, background-color 0.3s ease;
-    }
-    .suit-bar-fill.oxygen  { background: linear-gradient(90deg, #009999, #00e5ff); }
-    .suit-bar-fill.battery { background: linear-gradient(90deg, #006633, #00ff88); }
-    .suit-bar-fill.temp    { background: linear-gradient(90deg, #003399, #0066ff); }
-    .suit-bar-fill.critical { background: linear-gradient(90deg, #991100, #ff2200); }
-    .suit-bar-fill.warning  { background: linear-gradient(90deg, #996600, #ffaa00); }
-    .suit-value {
-      width: 36px;
-      text-align: right;
-      font-size: 10px;
-      color: #ffffff;
-      flex-shrink: 0;
-    }
-
-    /* ── System Status (top-right) ── */
-    #hud-system {
-      position: absolute;
-      top: 20px;
-      right: 20px;
-      min-width: 160px;
-    }
-    #hud-system-title {
-      font-size: 9px;
-      color: rgba(0, 200, 255, 0.6);
-      text-transform: uppercase;
-      letter-spacing: 0.2em;
-      margin-bottom: 8px;
-    }
-    .sys-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 5px;
-    }
-    .sys-row:last-child { margin-bottom: 0; }
-    .sys-key {
-      font-size: 10px;
-      color: rgba(0, 200, 255, 0.8);
-      letter-spacing: 0.12em;
-    }
-    .sys-dot {
-      width: 8px;
-      height: 8px;
       border-radius: 50%;
-      flex-shrink: 0;
-    }
-    .sys-dot.online  { background: #00ff88; box-shadow: 0 0 6px #00ff88; }
-    .sys-dot.offline { background: #ff2200; box-shadow: 0 0 6px #ff2200; animation: pulse-critical 1s infinite; }
-
-    /* ── Interaction Prompt (bottom-right) ── */
-    #hud-interact {
-      position: absolute;
-      bottom: 24px;
-      right: 20px;
-      text-align: right;
-      transition: opacity 0.3s ease;
-    }
-    #hud-interact-key {
-      font-size: 13px;
-      color: #ffffff;
-      letter-spacing: 0.1em;
-    }
-    #hud-interact-action {
-      font-size: 10px;
-      color: rgba(0, 200, 255, 0.8);
-      letter-spacing: 0.15em;
-      margin-top: 2px;
     }
 
-    /* ── Storm Warning (top-center) ── */
-    #hud-storm {
-      position: absolute;
-      top: 0;
-      left: 50%;
-      transform: translateX(-50%);
-      text-align: center;
-      padding: 8px 28px;
-      background: rgba(120, 50, 0, 0.75);
-      border: 1px solid rgba(255, 170, 0, 0.5);
-      border-top: none;
-      border-radius: 0 0 4px 4px;
-      transition: opacity 0.4s ease;
-    }
-    #hud-storm-text {
-      font-size: 11px;
+    .interaction-prompt {
+      font-size: 16px;
+      letter-spacing: 2px;
       color: #ffaa00;
-      text-transform: uppercase;
-      letter-spacing: 0.25em;
-      animation: pulse-warn 1.4s ease-in-out infinite;
+      text-shadow: 0 0 5px rgba(255,170,0,0.5);
     }
 
-    /* ── Objective Complete Banner ── */
-    #hud-obj-complete {
+    .scanline {
       position: absolute;
-      top: 80px;
-      left: 50%;
-      transform: translateX(-50%) translateY(-20px);
-      text-align: center;
-      padding: 10px 30px;
-      background: rgba(0, 15, 25, 0.85);
-      border: 1px solid rgba(0, 255, 136, 0.5);
-      border-radius: 2px;
-      opacity: 0;
-      transition: opacity 0.4s ease, transform 0.4s ease;
+      inset: 0;
+      background: linear-gradient(to bottom, rgba(255,255,255,0), rgba(255,255,255,0) 50%, rgba(0,0,0,0.1) 50%, rgba(0,0,0,0.1));
+      background-size: 100% 4px;
       pointer-events: none;
-    }
-    #hud-obj-complete.visible {
-      opacity: 1;
-      transform: translateX(-50%) translateY(0);
-    }
-    #hud-obj-complete-label {
-      font-size: 9px;
-      color: #00ff88;
-      letter-spacing: 0.3em;
-      text-transform: uppercase;
-      margin-bottom: 3px;
-    }
-    #hud-obj-complete-text {
-      font-size: 12px;
-      color: #ffffff;
-      letter-spacing: 0.1em;
-    }
-
-    /* ── ORION Message (top-center, below storm) ── */
-    #hud-orion {
-      position: absolute;
-      top: 16px;
-      left: 50%;
-      transform: translateX(-50%);
-      text-align: center;
-      min-width: 320px;
-      max-width: 520px;
-      padding: 10px 20px;
-      background: rgba(0, 15, 40, 0.8);
-      border: 1px solid rgba(0, 200, 255, 0.25);
-      border-radius: 2px;
-      transition: opacity 0.3s ease;
-    }
-    #hud-orion-label {
-      font-size: 9px;
-      color: rgba(0, 200, 255, 0.6);
-      letter-spacing: 0.25em;
-      text-transform: uppercase;
-      margin-bottom: 4px;
-    }
-    #hud-orion-text {
-      font-size: 12px;
-      color: #ffffff;
-      line-height: 1.5;
-    }
-
-    /* ── Autosave Indicator ── */
-    #hud-autosave {
-      position: absolute;
-      bottom: 24px;
-      right: 20px;
-      font-size: 10px;
-      color: rgba(0, 200, 255, 0.7);
-      letter-spacing: 0.2em;
-      text-transform: uppercase;
-      transition: opacity 0.5s ease;
-    }
-
-    /* ── Animations ── */
-    @keyframes pulse-critical {
-      0%, 100% { opacity: 1; }
-      50%       { opacity: 0.3; }
-    }
-    @keyframes pulse-warn {
-      0%, 100% { opacity: 1; }
-      50%       { opacity: 0.5; }
+      opacity: 0.3;
     }
   `;
   document.head.appendChild(style);
 }
 
-// ────────────────────────────────────────────────────────────
 export class HUD {
-  private root: HTMLElement;
-  private crosshair!: HTMLElement;
-  private missionNameEl!: HTMLElement;
-  private missionObjEl!: HTMLElement;
-  private suitBars: Record<string, { fill: HTMLElement; value: HTMLElement }> = {};
-  private systemDots: Record<string, HTMLElement> = {};
-  private interactEl!: HTMLElement;
-  private interactKeyEl!: HTMLElement;
-  private interactActionEl!: HTMLElement;
-  private stormEl!: HTMLElement;
-  private objCompleteEl!: HTMLElement;
-  private objCompleteTextEl!: HTMLElement;
-  private orionEl!: HTMLElement;
-  private orionTextEl!: HTMLElement;
-  private autosaveEl!: HTMLElement;
-  private systemPanel!: HTMLElement;
-
-  private orionTimer: ReturnType<typeof setTimeout> | null = null;
-  private objTimer: ReturnType<typeof setTimeout> | null = null;
-  private autosaveTimer: ReturnType<typeof setTimeout> | null = null;
+  private container: HTMLElement;
+  private timeEl: HTMLElement;
+  private tempEl: HTMLElement;
+  private hrEl: HTMLElement;
+  private integrityFill: HTMLElement;
+  private oxyFill: HTMLElement;
+  private waterFill: HTMLElement;
+  private calFill: HTMLElement;
+  private promptEl: HTMLElement;
+  
+  private startTime: number;
 
   constructor() {
     injectHUDStyles();
-    this.root = document.createElement('div');
-    this.root.id = 'mars-hud';
-    this.root.style.display = 'none';
-    this.buildDOM();
-    document.body.appendChild(this.root);
+    
+    this.container = document.createElement('div');
+    this.container.id = 'mars-hud';
+    
+    this.container.innerHTML = `
+      <div class="visor-overlay"></div>
+      <div class="scanline"></div>
+      
+      <div class="hud-header">
+        <div style="font-size:10px; color:#66b3ff;">EVA TIME</div>
+        <div class="hud-eva-time" id="hud-eva-time">00:00:00</div>
+      </div>
+
+      <div class="hud-panel hud-left">
+        <div style="text-align:center; margin-bottom:10px;">
+          <svg width="60" height="120" viewBox="0 0 60 120">
+            <!-- Simplified astronaut icon -->
+            <rect x="20" y="30" width="20" height="35" fill="none" stroke="#99d6ff" stroke-width="2"/>
+            <circle cx="30" cy="15" r="10" fill="none" stroke="#99d6ff" stroke-width="2"/>
+            <rect x="10" y="30" width="8" height="30" fill="none" stroke="#99d6ff" stroke-width="2"/>
+            <rect x="42" y="30" width="8" height="30" fill="none" stroke="#99d6ff" stroke-width="2"/>
+            <rect x="22" y="67" width="7" height="35" fill="none" stroke="#99d6ff" stroke-width="2"/>
+            <rect x="31" y="67" width="7" height="35" fill="none" stroke="#99d6ff" stroke-width="2"/>
+          </svg>
+        </div>
+        
+        <div class="stat-row">
+          <span class="stat-label">INTEGRITY</span>
+          <span class="stat-value" id="hud-integrity-val">100%</span>
+        </div>
+        <div class="bar-container"><div class="bar-fill" id="hud-integrity-bar" style="width:100%"></div></div>
+        
+        <div class="stat-large" id="hud-temp" style="margin-top:20px; text-align:center;">76°F</div>
+        <div style="text-align:center; color:#66b3ff; font-size:12px;">EXTERIOR TEMP</div>
+      </div>
+
+      <div class="hud-panel hud-right">
+        <div class="stat-row">
+          <span class="stat-label">O2 LEVEL</span>
+          <span class="stat-value" id="hud-o2-val">100%</span>
+        </div>
+        <div class="bar-container"><div class="bar-fill" id="hud-o2-bar" style="width:100%"></div></div>
+
+        <div class="stat-row" style="margin-top:15px;">
+          <span class="stat-label">H2O SUPPLY</span>
+          <span class="stat-value" id="hud-water-val">100%</span>
+        </div>
+        <div class="bar-container"><div class="bar-fill" id="hud-water-bar" style="width:100%"></div></div>
+        
+        <div class="stat-row" style="margin-top:15px;">
+          <span class="stat-label">CALORIES</span>
+          <span class="stat-value" id="hud-cal-val">2500</span>
+        </div>
+        <div class="bar-container"><div class="bar-fill" id="hud-cal-bar" style="width:100%"></div></div>
+
+        <div style="margin-top:25px; text-align:right;">
+          <div style="color:#66b3ff; font-size:10px; margin-bottom:5px;">HEART RATE</div>
+          <div style="display:flex; align-items:center; justify-content:flex-end;">
+            <svg width="60" height="20" viewBox="0 0 60 20" style="margin-right:10px;">
+              <polyline points="0,10 15,10 20,2 25,18 30,10 60,10" fill="none" stroke="#ff4444" stroke-width="1.5" />
+            </svg>
+            <span class="stat-value" id="hud-hr-val" style="font-size:20px;">65 BPM</span>
+          </div>
+        </div>
+      </div>
+
+      <div id="hud-crosshair"></div>
+
+      <div class="hud-bottom-center">
+        <div id="hud-prompt" class="interaction-prompt"></div>
+      </div>
+    `;
+
+    document.body.appendChild(this.container);
+    
+    this.timeEl = document.getElementById('hud-eva-time')!;
+    this.tempEl = document.getElementById('hud-temp')!;
+    this.hrEl = document.getElementById('hud-hr-val')!;
+    this.integrityFill = document.getElementById('hud-integrity-bar')!;
+    this.oxyFill = document.getElementById('hud-o2-bar')!;
+    this.waterFill = document.getElementById('hud-water-bar')!;
+    this.calFill = document.getElementById('hud-cal-bar')!;
+    this.promptEl = document.getElementById('hud-prompt')!;
+    
+    this.startTime = Date.now();
+    this.hide();
   }
 
-  // ── Build ────────────────────────────────────────────────
+  show(): void { this.container.style.display = 'block'; }
+  hide(): void { this.container.style.display = 'none'; }
 
-  private buildDOM(): void {
-    this.root.innerHTML = '';
+  update(suit: SuitHUDData, missionText: string, status: SystemStatus): void {
+    // Format Time
+    const elapsed = Math.floor((Date.now() - this.startTime) / 1000);
+    const h = Math.floor(elapsed / 3600).toString().padStart(2, '0');
+    const m = Math.floor((elapsed % 3600) / 60).toString().padStart(2, '0');
+    const s = (elapsed % 60).toString().padStart(2, '0');
+    this.timeEl.innerText = `${h}:${m}:${s}`;
 
-    // Crosshair
-    this.crosshair = document.createElement('div');
-    this.crosshair.id = 'hud-crosshair';
-    const dot = document.createElement('div');
-    dot.id = 'hud-crosshair-dot';
-    this.crosshair.appendChild(dot);
-    this.root.appendChild(this.crosshair);
+    // Convert C to F for the cinematic HUD
+    const tempF = Math.round(suit.temperature * 9/5 + 32);
+    this.tempEl.innerText = `${tempF}°F`;
+    if (tempF < 32) this.tempEl.style.color = '#ffaa00';
+    else this.tempEl.style.color = '#fff';
 
-    // Mission panel (top-left)
-    const missionPanel = document.createElement('div');
-    missionPanel.id = 'hud-mission';
-    missionPanel.className = 'hud-panel';
-    this.missionNameEl = document.createElement('div');
-    this.missionNameEl.id = 'hud-mission-name';
-    this.missionNameEl.textContent = 'MISSION';
-    this.missionObjEl = document.createElement('div');
-    this.missionObjEl.id = 'hud-mission-objective';
-    this.missionObjEl.textContent = '—';
-    missionPanel.appendChild(this.missionNameEl);
-    missionPanel.appendChild(this.missionObjEl);
-    this.root.appendChild(missionPanel);
+    this.hrEl.innerText = `${Math.round(suit.heartRate)} BPM`;
 
-    // Suit status (bottom-left)
-    const suitPanel = document.createElement('div');
-    suitPanel.id = 'hud-suit';
-    suitPanel.className = 'hud-panel';
-    for (const [key, cls] of [['O2', 'oxygen'], ['BAT', 'battery'], ['TMP', 'temp']] as [string, string][]) {
-      const row = document.createElement('div');
-      row.className = 'suit-stat-row';
-      const label = document.createElement('div');
-      label.className = 'suit-label';
-      label.textContent = key;
-      const barBg = document.createElement('div');
-      barBg.className = 'suit-bar-bg';
-      const fill = document.createElement('div');
-      fill.className = `suit-bar-fill ${cls}`;
-      fill.style.width = '100%';
-      barBg.appendChild(fill);
-      const val = document.createElement('div');
-      val.className = 'suit-value';
-      val.textContent = '100%';
-      row.appendChild(label);
-      row.appendChild(barBg);
-      row.appendChild(val);
-      suitPanel.appendChild(row);
-      this.suitBars[key] = { fill, value: val };
-    }
-    this.root.appendChild(suitPanel);
-
-    // System status (top-right)
-    this.systemPanel = document.createElement('div');
-    this.systemPanel.id = 'hud-system';
-    this.systemPanel.className = 'hud-panel';
-    const sysTitle = document.createElement('div');
-    sysTitle.id = 'hud-system-title';
-    sysTitle.textContent = 'SYSTEM STATUS';
-    this.systemPanel.appendChild(sysTitle);
-    for (const key of ['POWER', 'O2', 'COMMS']) {
-      const row = document.createElement('div');
-      row.className = 'sys-row';
-      const keyEl = document.createElement('div');
-      keyEl.className = 'sys-key';
-      keyEl.textContent = key;
-      const dot = document.createElement('div');
-      dot.className = 'sys-dot online';
-      row.appendChild(keyEl);
-      row.appendChild(dot);
-      this.systemPanel.appendChild(row);
-      this.systemDots[key] = dot;
-    }
-    this.root.appendChild(this.systemPanel);
-
-    // Interaction prompt (bottom-right)
-    this.interactEl = document.createElement('div');
-    this.interactEl.id = 'hud-interact';
-    this.interactEl.className = 'hud-panel';
-    this.interactEl.style.opacity = '0';
-    this.interactKeyEl = document.createElement('div');
-    this.interactKeyEl.id = 'hud-interact-key';
-    this.interactActionEl = document.createElement('div');
-    this.interactActionEl.id = 'hud-interact-action';
-    this.interactEl.appendChild(this.interactKeyEl);
-    this.interactEl.appendChild(this.interactActionEl);
-    this.root.appendChild(this.interactEl);
-
-    // Storm warning (top-center)
-    this.stormEl = document.createElement('div');
-    this.stormEl.id = 'hud-storm';
-    this.stormEl.style.opacity = '0';
-    const stormText = document.createElement('div');
-    stormText.id = 'hud-storm-text';
-    stormText.textContent = '⚠  DUST STORM APPROACHING  ⚠';
-    this.stormEl.appendChild(stormText);
-    this.root.appendChild(this.stormEl);
-
-    // Objective complete banner
-    this.objCompleteEl = document.createElement('div');
-    this.objCompleteEl.id = 'hud-obj-complete';
-    const objLabel = document.createElement('div');
-    objLabel.id = 'hud-obj-complete-label';
-    objLabel.textContent = 'OBJECTIVE COMPLETE';
-    this.objCompleteTextEl = document.createElement('div');
-    this.objCompleteTextEl.id = 'hud-obj-complete-text';
-    this.objCompleteEl.appendChild(objLabel);
-    this.objCompleteEl.appendChild(this.objCompleteTextEl);
-    this.root.appendChild(this.objCompleteEl);
-
-    // ORION message
-    this.orionEl = document.createElement('div');
-    this.orionEl.id = 'hud-orion';
-    this.orionEl.style.opacity = '0';
-    const orionLabel = document.createElement('div');
-    orionLabel.id = 'hud-orion-label';
-    orionLabel.textContent = 'ORION AI';
-    this.orionTextEl = document.createElement('div');
-    this.orionTextEl.id = 'hud-orion-text';
-    this.orionEl.appendChild(orionLabel);
-    this.orionEl.appendChild(this.orionTextEl);
-    this.root.appendChild(this.orionEl);
-
-    // Autosave
-    this.autosaveEl = document.createElement('div');
-    this.autosaveEl.id = 'hud-autosave';
-    this.autosaveEl.textContent = '◉  AUTOSAVE';
-    this.autosaveEl.style.opacity = '0';
-    this.root.appendChild(this.autosaveEl);
+    this.updateBar(this.integrityFill, suit.integrity, document.getElementById('hud-integrity-val')!);
+    this.updateBar(this.oxyFill, suit.oxygen, document.getElementById('hud-o2-val')!);
+    this.updateBar(this.waterFill, suit.water, document.getElementById('hud-water-val')!);
+    
+    // Calories (max assumed 3000)
+    const calPct = Math.min(100, Math.max(0, (suit.calories / 3000) * 100));
+    this.calFill.style.width = `${calPct}%`;
+    document.getElementById('hud-cal-val')!.innerText = Math.round(suit.calories).toString();
+    if (calPct < 20) this.calFill.className = 'bar-fill warning';
+    else this.calFill.className = 'bar-fill';
   }
 
-  // ── Public API ───────────────────────────────────────────
-
-  show(): void {
-    this.root.style.display = 'block';
-  }
-
-  hide(): void {
-    this.root.style.display = 'none';
-  }
-
-  setHUDOpacity(opacity: number): void {
-    this.root.style.opacity = String(Math.max(0, Math.min(1, opacity)));
-  }
-
-  update(suitData: SuitHUDData, missionText: string, systemStatus: SystemStatus): void {
-    // Mission objective
-    this.missionObjEl.textContent = missionText;
-
-    // Suit bars
-    this.setSuitBar('O2', suitData.oxygen);
-    this.setSuitBar('BAT', suitData.battery);
-    this.setSuitBar('TMP', suitData.temperature);
-
-    // System status
-    for (const [key, online] of Object.entries(systemStatus)) {
-      this.setSystemStatus(key, online);
-    }
-  }
-
-  private setSuitBar(key: 'O2' | 'BAT' | 'TMP', value: number): void {
-    const bar = this.suitBars[key];
-    if (!bar) return;
-    const clamped = Math.max(0, Math.min(100, value));
-    bar.fill.style.width = `${clamped}%`;
-    bar.value.textContent = `${Math.round(clamped)}%`;
-
-    // Remove state classes
-    bar.fill.classList.remove('critical', 'warning');
-    if (clamped <= 20) {
-      bar.fill.classList.add('critical');
-      bar.value.style.color = '#ff2200';
-    } else if (clamped <= 40) {
-      bar.fill.classList.add('warning');
-      bar.value.style.color = '#ffaa00';
-    } else {
-      bar.value.style.color = '#ffffff';
-    }
+  private updateBar(el: HTMLElement, val: number, textEl: HTMLElement) {
+    el.style.width = `${val}%`;
+    textEl.innerText = `${Math.round(val)}%`;
+    if (val < 15) el.className = 'bar-fill critical';
+    else if (val < 30) el.className = 'bar-fill warning';
+    else el.className = 'bar-fill';
   }
 
   setInteractionPrompt(text: string | null): void {
     if (text) {
-      // Split on ' — ' pattern if present: 'E — ACCESS TERMINAL'
-      const dashIdx = text.indexOf('—');
-      if (dashIdx !== -1) {
-        this.interactKeyEl.textContent = text.slice(0, dashIdx).trim();
-        this.interactActionEl.textContent = text.slice(dashIdx).trim();
-      } else {
-        this.interactKeyEl.textContent = '[E]';
-        this.interactActionEl.textContent = text;
-      }
-      this.interactEl.style.opacity = '1';
+      this.promptEl.innerText = text;
+      this.promptEl.style.display = 'block';
     } else {
-      this.interactEl.style.opacity = '0';
+      this.promptEl.style.display = 'none';
     }
   }
 
-  showObjectiveComplete(text: string): void {
-    if (this.objTimer) clearTimeout(this.objTimer);
-    this.objCompleteTextEl.textContent = text;
-    this.objCompleteEl.classList.add('visible');
-    this.objTimer = setTimeout(() => {
-      this.objCompleteEl.classList.remove('visible');
-    }, 4000);
-  }
-
-  showStormWarning(active: boolean): void {
-    this.stormEl.style.opacity = active ? '1' : '0';
-  }
-
-  showORIONMessage(text: string, duration = 5000): void {
-    if (this.orionTimer) clearTimeout(this.orionTimer);
-    this.orionTextEl.textContent = '';
-    this.orionEl.style.opacity = '1';
-    this.typewriterEffect(this.orionTextEl, text, Math.min(duration * 0.4, 1500));
-    this.orionTimer = setTimeout(() => {
-      this.orionEl.style.opacity = '0';
-    }, duration);
-  }
-
-  private typewriterEffect(el: HTMLElement, text: string, totalMs: number): void {
-    el.textContent = '';
-    const perChar = Math.max(16, totalMs / text.length);
-    let i = 0;
-    const tick = () => {
-      if (i < text.length) {
-        el.textContent += text[i++];
-        setTimeout(tick, perChar);
-      }
-    };
-    tick();
-  }
-
-  setSystemStatus(key: string, online: boolean): void {
-    // Add dot if new key
-    if (!this.systemDots[key]) {
-      const row = document.createElement('div');
-      row.className = 'sys-row';
-      const keyEl = document.createElement('div');
-      keyEl.className = 'sys-key';
-      keyEl.textContent = key;
-      const dot = document.createElement('div');
-      dot.className = 'sys-dot online';
-      row.appendChild(keyEl);
-      row.appendChild(dot);
-      this.systemPanel.appendChild(row);
-      this.systemDots[key] = dot;
-    }
-    const dot = this.systemDots[key];
-    dot.className = `sys-dot ${online ? 'online' : 'offline'}`;
-  }
-
-  setMissionName(name: string): void {
-    this.missionNameEl.textContent = name.toUpperCase();
-  }
-
-  showAutosave(): void {
-    if (this.autosaveTimer) clearTimeout(this.autosaveTimer);
-    // Move autosave to bottom-right, above interact if hidden
-    this.autosaveEl.style.opacity = '1';
-    this.autosaveTimer = setTimeout(() => {
-      this.autosaveEl.style.opacity = '0';
-    }, 2500);
-  }
+  showObjectiveComplete(text: string): void {}
+  showStormWarning(active: boolean): void {}
+  showORIONMessage(text: string, duration?: number): void {}
+  setSystemStatus(key: string, online: boolean): void {}
+  showAutosave(): void {}
+  setHUDOpacity(opacity: number): void { this.container.style.opacity = opacity.toString(); }
 
   dispose(): void {
-    if (this.orionTimer) clearTimeout(this.orionTimer);
-    if (this.objTimer) clearTimeout(this.objTimer);
-    if (this.autosaveTimer) clearTimeout(this.autosaveTimer);
-    this.root.remove();
-    const styleEl = document.getElementById(HUD_STYLE_ID);
-    if (styleEl) styleEl.remove();
+    if (this.container && this.container.parentNode) {
+      this.container.parentNode.removeChild(this.container);
+    }
   }
 }

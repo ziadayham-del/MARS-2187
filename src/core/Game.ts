@@ -10,6 +10,8 @@ import { PlayerController } from '../player/PlayerController.js';
 import { PlayerState } from '../player/PlayerState.js';
 import { InteractionSystem } from '../player/InteractionSystem.js';
 import { World } from '../world/World.js';
+import { HUD } from '../ui/HUD.js';
+import { SuitSystem } from '../player/SuitSystem.js';
 
 export enum GamePhase {
   LOADING, MAIN_MENU, CINEMATIC, PLAYING, ROVER, PAUSED, TERMINAL, DIALOGUE, CHOICE, ENDING, CREDITS
@@ -30,6 +32,8 @@ export class Game {
   lighting!: Lighting;
   environment!: Environment;
   postProcessing!: PostProcessing;
+  hud!: HUD;
+  suitSystem!: SuitSystem;
   
   gamePhase: GamePhase = GamePhase.LOADING;
   devMode: boolean = false;
@@ -73,7 +77,11 @@ export class Game {
     this.playerState = new PlayerState();
     this.interactionSystem = new InteractionSystem(this.camera, this.scene);
     
-    this.gamePhase = GamePhase.PLAYING;
+    this.suitSystem = new SuitSystem(this.playerState);
+    this.hud = new HUD();
+    this.hud.show();
+    
+    this.gamePhase = GamePhase.CINEMATIC;
     
     // Auto-start pointer lock when clicking the canvas
     this.renderer.renderer.domElement.addEventListener('click', () => {
@@ -82,8 +90,59 @@ export class Game {
       }
     });
 
+    // Landing Cinematic Sequence
+    let dropHeight = 1000;
+    this.playerController.setPosition(new THREE.Vector3(0, dropHeight, 0));
+    
+    const uiRoot = document.getElementById('ui-root');
+    if (uiRoot) {
+      uiRoot.innerHTML = '<div style="position:absolute; inset:0; background:black; color:white; display:flex; align-items:center; justify-content:center; font-family:monospace; font-size:24px; z-index:9999;" id="landing-overlay">INITIATING ATMOSPHERIC ENTRY...</div>';
+    }
+
+    let cinematicTime = 0;
+    
     this.gameLoop.start(
-      (delta, time) => this.update(delta, time),
+      (delta, time) => {
+        if (this.gamePhase === GamePhase.CINEMATIC) {
+          cinematicTime += delta;
+          
+          if (cinematicTime < 5) {
+            // Freefall
+            dropHeight -= 200 * delta;
+            this.playerController.setPosition(new THREE.Vector3(0, Math.max(2, dropHeight), 0));
+            // Shake
+            this.camera.position.x += (Math.random() - 0.5) * 0.5;
+            this.camera.position.z += (Math.random() - 0.5) * 0.5;
+            
+            const overlay = document.getElementById('landing-overlay');
+            if (overlay && cinematicTime > 2) overlay.innerText = 'WARNING: HIGH VELOCITY IMPACT IMMINENT';
+          } else if (cinematicTime >= 5 && cinematicTime < 8) {
+            this.playerController.setPosition(new THREE.Vector3(0, 2, 0)); // landed
+            const overlay = document.getElementById('landing-overlay');
+            if (overlay) {
+              overlay.style.background = 'transparent';
+              overlay.innerText = 'TOUCHDOWN SUCCESSFUL. SYSTEMS ONLINE.';
+              overlay.style.textShadow = '0 0 10px #000';
+            }
+          } else if (cinematicTime >= 8) {
+            this.gamePhase = GamePhase.PLAYING;
+            const overlay = document.getElementById('landing-overlay');
+            if (overlay) overlay.remove();
+            
+            if (uiRoot) {
+              uiRoot.innerHTML = `
+                <div style="position:absolute; top:20px; left:20px; color:#00ccff; font-family:monospace; font-size:18px; pointer-events:none; text-shadow: 0 0 4px #000; z-index:9999;">
+                  MARS: 2187<br>
+                  <span style="font-size:12px; color:#fff;">CLICK ANYWHERE TO START</span><br>
+                  <span style="font-size:12px; color:#fff;">W/A/S/D to move. Mouse to look. Esc to pause.</span>
+                </div>
+              `;
+            }
+          }
+        }
+        
+        this.update(delta, time);
+      },
       () => this.render()
     );
   }
@@ -119,12 +178,12 @@ export class Game {
   update(delta: number, time: number): void {
     if (this.gamePhase === GamePhase.PLAYING) {
       const input = {
-        forward: this.inputManager.isKeyDown('w'),
-        back: this.inputManager.isKeyDown('s'),
-        left: this.inputManager.isKeyDown('a'),
-        right: this.inputManager.isKeyDown('d'),
-        sprint: this.inputManager.isKeyDown('shift'),
-        jump: this.inputManager.isKeyDown(' '),
+        forward: this.inputManager.isMoveForward(),
+        back: this.inputManager.isMoveBackward(),
+        left: this.inputManager.isMoveLeft(),
+        right: this.inputManager.isMoveRight(),
+        sprint: this.inputManager.isSprint(),
+        jump: this.inputManager.isJump(),
         mouseDeltaX: this.inputManager.getMouseDelta().x,
         mouseDeltaY: this.inputManager.getMouseDelta().y
       };
@@ -132,15 +191,16 @@ export class Game {
       this.playerController.update(delta, input, this.world.terrain);
       this.playerState.update(delta, { isInsideHabitat: false, isNearOxygenSource: false, powerOnline: false, stormActive: false });
       this.interactionSystem.update(this.scene);
+      this.hud.update(this.suitSystem.getHUDData(), "EXPLORE MARS", { POWER: false, O2: false, COMMS: false });
       
-      if (this.inputManager.isKeyPressed('e')) {
+      if (this.inputManager.isInteract()) {
         this.interactionSystem.tryInteract();
       }
-      if (this.inputManager.isKeyPressed('f')) {
+      if (this.inputManager.isFlashlight()) {
         this.playerState.flashlightOn = !this.playerState.flashlightOn;
         this.lighting.setFlashlightEnabled(this.playerState.flashlightOn);
       }
-      if (this.inputManager.isKeyPressed('escape')) {
+      if (this.inputManager.isPause()) {
         this.pauseGame();
       }
     }

@@ -8,6 +8,8 @@ export interface SuitStatus {
   batteryWarning: boolean;  // battery < 20
   tempWarning: boolean;     // temperature outside safe range
   signalLost: boolean;      // signal < 5
+  foodWarning: boolean;
+  waterWarning: boolean;
 }
 
 export interface WorldStateInterface {
@@ -110,6 +112,8 @@ export class PlayerState {
       batteryWarning: this.battery < 20,
       tempWarning:    this.temperature < TEMP_SAFE_MIN || this.temperature > TEMP_SAFE_MAX,
       signalLost:     this.signal < 5,
+      foodWarning:    this.calories < 500,
+      waterWarning:   this.water < 20
     };
   }
 
