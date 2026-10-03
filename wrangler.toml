@@ -1,0 +1,3 @@
+# Wrangler configuration for Cloudflare Pages
+name = "mars-2187"
+pages_build_output_dir = "./dist"
