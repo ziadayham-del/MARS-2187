@@ -29,8 +29,9 @@ async function main() {
     const uiRoot = document.getElementById('ui-root');
     if (uiRoot) {
       uiRoot.innerHTML = `
-        <div style="position:absolute; top:20px; left:20px; color:#00ccff; font-family:monospace; font-size:18px;">
+        <div style="position:absolute; top:20px; left:20px; color:#00ccff; font-family:monospace; font-size:18px; pointer-events:none; text-shadow: 0 0 4px #000;">
           MARS: 2187<br>
+          <span style="font-size:12px; color:#fff;">CLICK ANYWHERE TO START</span><br>
           <span style="font-size:12px; color:#fff;">W/A/S/D to move. Mouse to look. Esc to pause.</span>
         </div>
       `;

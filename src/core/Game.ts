@@ -73,8 +73,15 @@ export class Game {
     this.playerState = new PlayerState();
     this.interactionSystem = new InteractionSystem(this.camera, this.scene);
     
-    this.gamePhase = GamePhase.MAIN_MENU;
+    this.gamePhase = GamePhase.PLAYING;
     
+    // Auto-start pointer lock when clicking the canvas
+    this.renderer.renderer.domElement.addEventListener('click', () => {
+      if (this.gamePhase === GamePhase.PLAYING) {
+        this.inputManager.requestPointerLock();
+      }
+    });
+
     this.gameLoop.start(
       (delta, time) => this.update(delta, time),
       () => this.render()
